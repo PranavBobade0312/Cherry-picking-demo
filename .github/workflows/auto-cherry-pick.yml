@@ -1,0 +1,42 @@
+name: Auto Cherry Pick
+
+on:
+  push:
+    branches:
+      - main   # runs when commits are pushed to main
+
+jobs:
+  cherry-pick:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Install yq
+        run: sudo apt-get install -y yq
+
+      - name: Read active branches
+        id: branches
+        run: |
+          echo "branches=$(yq e '.branches | join(\" \")' active-branches.yml)" >> $GITHUB_OUTPUT
+
+      - name: Cherry-pick to active branches
+        run: |
+          for branch in ${{ steps.branches.outputs.branches }}; do
+            echo "⚡ Cherry-picking into $branch"
+            git fetch origin $branch
+            git checkout $branch
+            if git cherry-pick ${{ github.sha }}; then
+              git push origin $branch
+              echo "✅ Successfully cherry-picked into $branch"
+            else
+              echo "❌ Conflict while cherry-picking into $branch"
+              git cherry-pick --abort
+            fi
+          done
