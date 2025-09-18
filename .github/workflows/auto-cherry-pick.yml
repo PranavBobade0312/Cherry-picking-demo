@@ -1,4 +1,4 @@
-name: Cherry-pick Commit
+name: Manual Cherry-Pick
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ on:
         description: "Commit SHA to cherry-pick"
         required: true
       target_branch:
-        description: "Target branch to cherry-pick into"
+        description: "Branch to cherry-pick onto"
         required: true
 
 jobs:
@@ -15,10 +15,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0
+          fetch-depth: 0   # need full history for cherry-pick
 
       - name: Set up Git
         run: |
@@ -29,11 +29,12 @@ jobs:
         env:
           COMMIT_SHA: ${{ github.event.inputs.commit_sha }}
           TARGET_BRANCH: ${{ github.event.inputs.target_branch }}
+          GH_TOKEN: ${{ github.token }}   # ✅ allow gh CLI to create PR
         run: |
           set -e
-
           echo "🔹 Cherry-picking commit $COMMIT_SHA into $TARGET_BRANCH"
 
+          # Fetch and checkout target branch
           git fetch origin $TARGET_BRANCH
           git checkout -b $TARGET_BRANCH origin/$TARGET_BRANCH
 
@@ -42,23 +43,16 @@ jobs:
           # Try cherry-pick
           if ! git cherry-pick $COMMIT_SHA; then
             echo "⚠️ Conflict occurred, creating PR branch..."
-            
             git checkout -b $BRANCH_NAME
-
-            # Stage everything (conflict markers will remain in files)
             git add .
-
-            # Commit the conflict state so PR can be opened
-            git commit -m "Cherry-pick $COMMIT_SHA into $TARGET_BRANCH (with conflicts to resolve)"
-
+            git commit -m "Cherry-pick $COMMIT_SHA into $TARGET_BRANCH (with conflicts to resolve)" || true
             git push origin $BRANCH_NAME
 
             gh pr create \
               --base $TARGET_BRANCH \
               --head $BRANCH_NAME \
               --title "Cherry-pick $COMMIT_SHA into $TARGET_BRANCH" \
-              --body "This PR was created automatically and contains conflicts. Please resolve them manually."
-
+              --body "This PR was created automatically and contains conflicts. Please resolve them manually.\n\nOriginal commit: $COMMIT_SHA"
             exit 0
           fi
 
@@ -70,4 +64,4 @@ jobs:
             --base $TARGET_BRANCH \
             --head $BRANCH_NAME \
             --title "Cherry-pick $COMMIT_SHA into $TARGET_BRANCH" \
-            --body "Cherry-picked successfully without conflicts."
+            --body "Cherry-picked successfully without conflicts.\n\nOriginal commit: $COMMIT_SHA"
