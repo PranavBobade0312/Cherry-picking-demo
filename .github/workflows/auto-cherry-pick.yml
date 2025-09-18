@@ -1,42 +1,58 @@
-name: Auto Cherry Pick
+name: Manual Cherry-Pick
 
 on:
-  push:
-    branches:
-      - main   # runs when commits are pushed to main
+  workflow_dispatch:
+    inputs:
+      commit_id:
+        description: "Commit SHA to cherry-pick"
+        required: true
+      target_branch:
+        description: "Target branch to cherry-pick into"
+        required: true
+        default: "release/1.0"
 
 jobs:
   cherry-pick:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
 
-      - name: Set up Git
+      - name: Configure Git
         run: |
           git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Install yq
-        run: sudo apt-get install -y yq
-
-      - name: Read active branches
-        id: branches
+      - name: Cherry-pick commit
         run: |
-          echo "branches=$(yq e '.branches | join(\" \")' active-branches.yml)" >> $GITHUB_OUTPUT
+          COMMIT_SHA="${{ github.event.inputs.commit_id }}"
+          TARGET_BRANCH="${{ github.event.inputs.target_branch }}"
 
-      - name: Cherry-pick to active branches
-        run: |
-          for branch in ${{ steps.branches.outputs.branches }}; do
-            echo "⚡ Cherry-picking into $branch"
-            git fetch origin $branch
-            git checkout $branch
-            if git cherry-pick ${{ github.sha }}; then
-              git push origin $branch
-              echo "✅ Successfully cherry-picked into $branch"
-            else
-              echo "❌ Conflict while cherry-picking into $branch"
-              git cherry-pick --abort
-            fi
-          done
+          echo "🔹 Cherry-picking commit $COMMIT_SHA into $TARGET_BRANCH"
+
+          git fetch origin $TARGET_BRANCH
+          git checkout $TARGET_BRANCH
+
+          if git cherry-pick $COMMIT_SHA; then
+            echo "✅ Cherry-pick successful, pushing..."
+            git push origin $TARGET_BRANCH
+          else
+            echo "⚠️ Conflict occurred, creating PR..."
+            git cherry-pick --abort
+            NEW_BRANCH="cherry-pick-${COMMIT_SHA:0:7}"
+
+            git checkout -b $NEW_BRANCH
+            git cherry-pick $COMMIT_SHA || true
+            git push origin $NEW_BRANCH
+
+            gh pr create \
+              --base $TARGET_BRANCH \
+              --head $NEW_BRANCH \
+              --title "Cherry-pick $COMMIT_SHA into $TARGET_BRANCH" \
+              --body "Auto cherry-pick of commit $COMMIT_SHA into $TARGET_BRANCH"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
