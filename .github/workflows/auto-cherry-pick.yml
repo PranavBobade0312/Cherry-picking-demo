@@ -40,7 +40,7 @@ jobs:
             echo "✅ Cherry-pick successful, pushing..."
             git push origin $TARGET_BRANCH
           else
-            echo "⚠️ Conflict occurred, creating PR..."
+            echo "⚠️ Conflict occurred, creating PR branch..."
             git cherry-pick --abort
             NEW_BRANCH="cherry-pick-${COMMIT_SHA:0:7}"
 
@@ -48,6 +48,13 @@ jobs:
             git cherry-pick $COMMIT_SHA || true
             git push origin $NEW_BRANCH
 
+            # 🔹 Check if branch actually has changes
+            if [ "$(git rev-parse $TARGET_BRANCH)" = "$(git rev-parse HEAD)" ]; then
+              echo "⚠️ No changes to cherry-pick. Skipping PR."
+              exit 0
+            fi
+
+            echo "📌 Creating Pull Request..."
             gh pr create \
               --base $TARGET_BRANCH \
               --head $NEW_BRANCH \
