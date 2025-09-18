@@ -1,15 +1,14 @@
-name: Manual Cherry-Pick
+name: Cherry-pick Commit
 
 on:
   workflow_dispatch:
     inputs:
-      commit_id:
+      commit_sha:
         description: "Commit SHA to cherry-pick"
         required: true
       target_branch:
         description: "Target branch to cherry-pick into"
         required: true
-        default: "release/1.0"
 
 jobs:
   cherry-pick:
@@ -21,45 +20,54 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Configure Git
+      - name: Set up Git
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Cherry-pick commit
+      - name: Perform cherry-pick
+        env:
+          COMMIT_SHA: ${{ github.event.inputs.commit_sha }}
+          TARGET_BRANCH: ${{ github.event.inputs.target_branch }}
         run: |
-          COMMIT_SHA="${{ github.event.inputs.commit_id }}"
-          TARGET_BRANCH="${{ github.event.inputs.target_branch }}"
+          set -e
 
           echo "🔹 Cherry-picking commit $COMMIT_SHA into $TARGET_BRANCH"
 
           git fetch origin $TARGET_BRANCH
-          git checkout $TARGET_BRANCH
+          git checkout -b $TARGET_BRANCH origin/$TARGET_BRANCH
 
-          if git cherry-pick $COMMIT_SHA; then
-            echo "✅ Cherry-pick successful, pushing..."
-            git push origin $TARGET_BRANCH
-          else
+          BRANCH_NAME="cherry-pick-$COMMIT_SHA"
+
+          # Try cherry-pick
+          if ! git cherry-pick $COMMIT_SHA; then
             echo "⚠️ Conflict occurred, creating PR branch..."
-            git cherry-pick --abort
-            NEW_BRANCH="cherry-pick-${COMMIT_SHA:0:7}"
+            
+            git checkout -b $BRANCH_NAME
 
-            git checkout -b $NEW_BRANCH
-            git cherry-pick $COMMIT_SHA || true
-            git push origin $NEW_BRANCH
+            # Stage everything (conflict markers will remain in files)
+            git add .
 
-            # 🔹 Check if branch actually has changes
-            if [ "$(git rev-parse $TARGET_BRANCH)" = "$(git rev-parse HEAD)" ]; then
-              echo "⚠️ No changes to cherry-pick. Skipping PR."
-              exit 0
-            fi
+            # Commit the conflict state so PR can be opened
+            git commit -m "Cherry-pick $COMMIT_SHA into $TARGET_BRANCH (with conflicts to resolve)"
 
-            echo "📌 Creating Pull Request..."
+            git push origin $BRANCH_NAME
+
             gh pr create \
               --base $TARGET_BRANCH \
-              --head $NEW_BRANCH \
+              --head $BRANCH_NAME \
               --title "Cherry-pick $COMMIT_SHA into $TARGET_BRANCH" \
-              --body "Auto cherry-pick of commit $COMMIT_SHA into $TARGET_BRANCH"
+              --body "This PR was created automatically and contains conflicts. Please resolve them manually."
+
+            exit 0
           fi
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+          echo "✅ Cherry-pick succeeded, creating PR branch..."
+          git checkout -b $BRANCH_NAME
+          git push origin $BRANCH_NAME
+
+          gh pr create \
+            --base $TARGET_BRANCH \
+            --head $BRANCH_NAME \
+            --title "Cherry-pick $COMMIT_SHA into $TARGET_BRANCH" \
+            --body "Cherry-picked successfully without conflicts."
