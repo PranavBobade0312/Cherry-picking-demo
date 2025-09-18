@@ -50,18 +50,16 @@ jobs:
         if: steps.cherry-pick.outputs.status != '0'
         run: |
           echo "❌ Conflict occurred! Creating PR..."
-          BRANCH_NAME="cherry-pick-${{ github.event.inputs.commit_id }}-to-${{ github.event.inputs.target_branch }}"
           
-          # Abort cherry-pick and create branch with conflicts
-          git cherry-pick --abort || true
-          git checkout -b $BRANCH_NAME
-          git cherry-pick ${{ github.event.inputs.commit_id }} || true
-          git push origin $BRANCH_NAME
+          # Keep conflicts in the target branch (do not create new branch)
+          git add . || true
+          git commit -m "WIP: Cherry-pick conflict for commit ${{ github.event.inputs.commit_id }}" || true
+          git push origin HEAD:${{ github.event.inputs.target_branch }}
 
           gh pr create \
             --base ${{ github.event.inputs.target_branch }} \
-            --head $BRANCH_NAME \
-            --title "Cherry-pick ${{ github.event.inputs.commit_id }} to ${{ github.event.inputs.target_branch }}" \
+            --head ${{ github.event.inputs.target_branch }} \
+            --title "Conflict: Cherry-pick ${{ github.event.inputs.commit_id }} to ${{ github.event.inputs.target_branch }}" \
             --body "This PR was automatically created because cherry-picking commit ${{ github.event.inputs.commit_id }} into ${{ github.event.inputs.target_branch }} resulted in conflicts. Please resolve them manually."
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
